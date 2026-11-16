@@ -1,0 +1,10 @@
+[package]
+name = "kagami-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+kagami-core = { path = "../kagami-core" }
+serde_json = "1"
+tempfile = "3"

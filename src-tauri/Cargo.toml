@@ -1,0 +1,13 @@
+[package]
+name = "kagami"
+version = "0.1.0"
+edition = "2021"
+default-run = "kagami"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+kagami-core = { path = "../crates/kagami-core" }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
