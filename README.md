@@ -83,3 +83,5 @@ The normal output directory can be changed with `CARGO_TARGET_DIR`. The test bui
 ### Cross-compiling from Linux or WSL
 
 The same build commands work on Linux and WSL with LLVM/Clang, LLD, `cargo-xwin`, and the `x86_64-pc-windows-msvc` Rust target installed. NSIS is also required to build installers. All tools must be available on PATH.
+
+Install the native Linux NSIS package before running `npm run bundle:windows` (for example, `sudo apt install nsis` on Ubuntu/Debian). On Arch Linux, NSIS is available through the [AUR](https://aur.archlinux.org/packages/nsis). On macOS, use `brew install nsis`. The installation must include the NSIS stubs, plugins, and include files as well as the compiler.

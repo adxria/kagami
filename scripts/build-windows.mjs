@@ -5,6 +5,19 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const test = process.argv.includes('--test-profile');
 const bundle = process.argv.includes('--bundle');
 const env = { ...process.env };
+if (bundle && process.platform !== 'win32') {
+  const nsis = spawnSync('makensis', ['-VERSION'], { env, encoding: 'utf8' });
+  if (nsis.error || nsis.status !== 0) {
+    console.error(
+      'Windows installer builds require the native NSIS compiler (makensis) on PATH.\n' +
+        'Install NSIS first; see README.md → Cross-compiling from Linux or WSL.\n' +
+        'Use npm run build:windows if you only need kagami.exe.',
+    );
+    if (nsis.error) console.error(nsis.error.message);
+    else console.error(nsis.stderr || nsis.stdout);
+    process.exit(1);
+  }
+}
 if (test) env.CARGO_TARGET_DIR = join(root, 'target/test-profile');
 const args = ['build', '--target', 'x86_64-pc-windows-msvc'];
 if (test) args.push('--config', join(root, 'src-tauri/tauri.test.conf.json'));
