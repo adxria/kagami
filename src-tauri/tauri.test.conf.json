@@ -2,5 +2,5 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "kagami test",
   "identifier": "app.kagami.test",
-  "bundle": { "active": false }
+  "bundle": { "active": false, "icon": ["icons/test.ico"] }
 }
