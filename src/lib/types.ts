@@ -58,7 +58,18 @@ export type Change =
 export interface Receipt {
   id: string;
 }
-export type Page = { kind: 'week' } | { kind: 'unassigned' } | { kind: 'context'; id: string };
+export type Page =
+  | { kind: 'week' }
+  | { kind: 'settings' }
+  | { kind: 'unassigned' }
+  | { kind: 'context'; id: string };
+export type ImportMode = 'add' | 'replace';
+export interface DataPreview {
+  token: string;
+  name: string;
+  contexts: number;
+  recordings: number;
+}
 export interface EntryDraft {
   contextId: string | null;
   startedAt: number;

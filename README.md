@@ -14,15 +14,41 @@ Closing the window sends Kagami to the system tray. The timer continues counting
 
 ## Data and backups
 
+Open **Settings** in the sidebar and choose **Export data** to save your contexts and recordings as a JSON file. An active timer continues running, and the exported file includes the time recorded up to the export.
+
 Kagami stores recordings locally in an SQLite database:
 
 ```text
 %LOCALAPPDATA%\app.kagami.desktop\database\kagami.sqlite3
 ```
 
-To back up your data, quit Kagami and copy the entire `database` folder, including any WAL files.
-
 Updates and normal uninstallation leave your data intact. Each Windows account has its own database.
+
+### Data format
+
+To import from another tracker, convert its data to a JSON file with this structure:
+
+```json
+{
+  "format": "kagami-data",
+  "version": 1,
+  "contexts": [
+    { "path": ["Japanese"], "color": "#7FBCF5", "trackingLocked": false },
+    { "path": ["Japanese", "Reading"], "color": "#7DCF9F", "trackingLocked": false }
+  ],
+  "recordings": [
+    {
+      "contextPath": ["Japanese", "Reading"],
+      "startedAt": 1735722000000,
+      "endedAt": 1735723800000
+    }
+  ]
+}
+```
+
+- Use Unix timestamps in UTC milliseconds. An end timestamp may equal the start. Use `null` for an unassigned recording’s `contextPath`.
+- List context paths as arrays of names from the root to the leaf. Kagami matches trimmed names without regard to case, with names unique among siblings. Use 1–120 characters per name. `Unassigned` is reserved.
+- List contexts in display order, with parents first. The optional `contexts` array can preserve order, colors, tracking locks, and empty contexts. Paths discovered only in recordings receive the default blue color and are unlocked.
 
 ## Development
 

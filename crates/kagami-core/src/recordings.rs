@@ -2,8 +2,10 @@ use crate::{contexts, Error, Recording, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
+pub(crate) const MAX_TIMESTAMP: i64 = 253_402_300_799_999;
+
 pub(crate) fn valid_now(now: i64) -> Result<()> {
-    if !(0..=253_402_300_799_999).contains(&now) {
+    if !(0..=MAX_TIMESTAMP).contains(&now) {
         return Err(Error::invalid(
             "The system clock is outside the supported calendar.",
         ));

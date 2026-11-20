@@ -5,6 +5,7 @@
   import { addDays, duration } from './lib/time';
   import { colorStyle, contextColor, contextPath, subtreeIds } from './lib/contexts';
   import Sidebar from './components/Sidebar.svelte';
+  import Settings from './components/Settings.svelte';
   import ContextPicker from './components/ContextPicker.svelte';
   import ContextView from './components/ContextView.svelte';
   import ContextForm from './components/ContextForm.svelte';
@@ -38,7 +39,8 @@
     ),
   );
   const canCreate = $derived(
-    !app.disabled &&
+    app.page.kind !== 'settings' &&
+      !app.disabled &&
       app.week < app.now &&
       !pageContext?.trackingLocked &&
       !editor &&
@@ -109,23 +111,27 @@
   <Sidebar {app} oncreate={(parentId) => (contextDraft = { parentId })} />
   <main>
     <header class="main-header">
-      <div class="week-navigation">
-        <div>
-          <span class="field-note">{app.page.kind === 'week' ? 'Week' : 'Selected week'}</span>
-          <h1>{weekLabel}</h1>
+      {#if app.page.kind === 'settings'}
+        <h1>Settings</h1>
+      {:else}
+        <div class="week-navigation">
+          <div>
+            <span class="field-note">{app.page.kind === 'week' ? 'Week' : 'Selected week'}</span>
+            <h1>{weekLabel}</h1>
+          </div>
+          <div class="week-arrows">
+            <button
+              class="icon-button"
+              aria-label="Previous week"
+              onclick={() => app.navigateWeek(-1)}>‹</button
+            ><button class="quiet" onclick={() => app.today()}>Today</button><button
+              class="icon-button"
+              aria-label="Next week"
+              onclick={() => app.navigateWeek(1)}>›</button
+            >
+          </div>
         </div>
-        <div class="week-arrows">
-          <button
-            class="icon-button"
-            aria-label="Previous week"
-            onclick={() => app.navigateWeek(-1)}>‹</button
-          ><button class="quiet" onclick={() => app.today()}>Today</button><button
-            class="icon-button"
-            aria-label="Next week"
-            onclick={() => app.navigateWeek(1)}>›</button
-          >
-        </div>
-      </div>
+      {/if}
       <div class="tracker-group">
         <div class="timer-controls" style={colorStyle(contextColor(app.trackingId, app.contexts))}>
           <ContextPicker
@@ -179,31 +185,35 @@
           >Dismiss</button
         >
       </div>{/if}
-    {#if app.snapshot?.overlapIds.some((id) => entries.some((e) => e.id === id))}<div
-        class="notice overlap-notice"
-      >
-        Some entries overlap. Totals include the full duration of each entry.
-      </div>{/if}
-    <div class="workspace">
-      {#if app.page.kind !== 'week'}{#key app.page.kind === 'context' ? app.page.id : 'unassigned'}<ContextView
-            {app}
-            context={pageContext}
-            ondelete={deleteContext}
-          />{/key}{/if}
+    {#if app.page.kind === 'settings'}
+      <Settings {app} />
+    {:else}
+      {#if app.snapshot?.overlapIds.some((id) => entries.some((e) => e.id === id))}<div
+          class="notice overlap-notice"
+        >
+          Some entries overlap. Totals include the full duration of each entry.
+        </div>{/if}
+      <div class="workspace">
+        {#if app.page.kind !== 'week'}{#key app.page.kind === 'context' ? app.page.id : 'unassigned'}<ContextView
+              {app}
+              context={pageContext}
+              ondelete={deleteContext}
+            />{/key}{/if}
 
-      <Timeline
-        start={app.week}
-        {entries}
-        contexts={app.contexts}
-        now={app.now}
-        {canCreate}
-        loading={app.loading}
-        onedit={edit}
-        oncreate={create}
-        onadd={() => create()}
-        draft={preview}
-      />
-    </div>
+        <Timeline
+          start={app.week}
+          {entries}
+          contexts={app.contexts}
+          now={app.now}
+          {canCreate}
+          loading={app.loading}
+          onedit={edit}
+          oncreate={create}
+          onadd={() => create()}
+          draft={preview}
+        />
+      </div>
+    {/if}
     {#if app.loading}<div class="loading" role="status">Loading local workspace…</div>{/if}
   </main>
 </div>

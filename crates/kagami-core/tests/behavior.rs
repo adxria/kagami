@@ -207,20 +207,42 @@ fn locks_are_direct_and_completed_corrections_remain_possible() {
     );
 }
 #[test]
-fn targeted_context_changes_preserve_independent_properties_and_global_names() {
+fn targeted_context_changes_preserve_independent_properties_and_sibling_names() {
     let mut store = Store::memory().unwrap();
     let parent = context(&mut store, " Parent ", None);
     let child = context(&mut store, "Child", Some(&parent));
+    let other = context(&mut store, "Other", None);
+    let same_name = context(&mut store, " child ", Some(&other));
     assert!(store
         .apply_change(
             Change::CreateContext {
-                name: "PARENT".into(),
-                parent_id: Some(child.clone()),
+                name: "CHILD".into(),
+                parent_id: Some(parent.clone()),
                 color: "fff".into()
             },
             NOW
         )
         .is_err());
+    assert!(store
+        .apply_change(
+            Change::RenameContext {
+                id: other,
+                name: "PARENT".into(),
+            },
+            NOW
+        )
+        .is_err());
+    let error = store
+        .apply_change(
+            Change::MoveContext {
+                id: same_name.clone(),
+                parent_id: Some(parent.clone()),
+                position: 0,
+            },
+            NOW,
+        )
+        .unwrap_err();
+    assert_eq!(error.message, "Parent already has a context named child.");
     assert!(store
         .apply_change(
             Change::RenameContext {
@@ -260,6 +282,66 @@ fn targeted_context_changes_preserve_independent_properties_and_global_names() {
     );
     assert_eq!(c.color, "#AABBCC");
     assert_eq!(c.parent_id, Some(parent));
+    assert_ne!(
+        data.contexts
+            .iter()
+            .find(|c| c.id == same_name)
+            .unwrap()
+            .parent_id,
+        c.parent_id
+    );
+}
+
+#[test]
+fn upgrading_v1_preserves_tree_timer_and_recording_relationships() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v1.sqlite3");
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch(include_str!("../src/schema.sql")).unwrap();
+    db.execute_batch(
+        "
+        INSERT INTO contexts VALUES ('a','Japanese','japanese',NULL,'#7FBCF5',0,1);
+        INSERT INTO contexts VALUES ('b','English','english',NULL,'#7FBCF5',0,0);
+        INSERT INTO contexts VALUES ('c','Reading','reading','a','#7DCF9F',1,0);
+        INSERT INTO recordings VALUES ('entry','c',1000,2000);
+        INSERT INTO recordings VALUES ('running','b',3000,NULL);
+    ",
+    )
+    .unwrap();
+    drop(db);
+
+    let mut store = Store::open(&path).unwrap();
+    context(&mut store, "Reading", Some("b"));
+    let workspace = store.read_workspace(QUERY, NOW).unwrap();
+    assert_eq!(workspace.running.unwrap().id, "running");
+    let original = workspace
+        .contexts
+        .iter()
+        .find(|context| context.id == "c")
+        .unwrap();
+    assert_eq!(original.parent_id.as_deref(), Some("a"));
+    assert_eq!(
+        (&*original.color, original.tracking_locked),
+        ("#7DCF9F", true)
+    );
+    let roots: Vec<_> = workspace
+        .contexts
+        .iter()
+        .filter(|context| context.parent_id.is_none())
+        .map(|context| context.id.as_str())
+        .collect();
+    assert_eq!(roots, ["b", "a"]);
+    let entry = workspace
+        .recordings
+        .iter()
+        .find(|entry| entry.id == "entry")
+        .unwrap();
+    assert_eq!(entry.context_id.as_deref(), Some("c"));
+    apply(&mut store, Change::DeleteContext { id: "a".into() });
+    assert_eq!(
+        store.read_workspace(QUERY, NOW).unwrap().recordings.len(),
+        1
+    );
 }
 #[test]
 fn hierarchy_and_sibling_positions_commit_together_and_reject_cycles() {

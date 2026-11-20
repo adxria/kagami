@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { name }: { name: 'calendar' | 'lock' | 'chevron' | 'check' } = $props();
+  let { name }: { name: 'calendar' | 'lock' | 'chevron' | 'check' | 'settings' } = $props();
 </script>
 
 <svg
@@ -20,6 +20,8 @@
     <path d="M5.5 7V4.5a2.5 2.5 0 0 1 5 0V7M8 10v2" />
   {:else if name === 'chevron'}
     <path d="m4 6 4 4 4-4" />
+  {:else if name === 'settings'}
+    <path d="M2 4h4m3 0h5M2 8h7m3 0h2M2 12h2m3 0h7M6 2.5v3m6 1v3m-8 1v3" />
   {:else}
     <path d="m3 8 3 3 7-7" />
   {/if}

@@ -30,6 +30,7 @@
     scrollSpeed = 0,
     suppressClick = false;
   const forbidden = $derived(dragging ? subtreeIds(app.contexts, dragging) : new Set<string>());
+  const rows = $derived(contextRows(app.contexts));
   function stopScroll() {
     cancelAnimationFrame(scrollFrame);
     scrollFrame = 0;
@@ -94,6 +95,7 @@
         : siblings.length;
     const source = app.contexts.find((c) => c.id === dragging);
     if (!source || (source.parentId === parentId && source.position === position)) return null;
+    const targetPath = rows.find((row) => row.id === target?.id)?.path;
     return {
       targetId: target?.id ?? null,
       placement,
@@ -102,8 +104,8 @@
       label: !target
         ? 'Move to end of top level'
         : placement === 'inside'
-          ? `Move into ${target.name} · at end`
-          : `Move ${placement} ${target.name}`,
+          ? `Move into ${targetPath} · at end`
+          : `Move ${placement} ${targetPath}`,
     };
   }
   function dragOver(event: DragEvent, target: Context | null) {
@@ -208,7 +210,7 @@
     >
   </div>
   <div class="context-list" bind:this={list}>
-    {#each contextRows(app.contexts) as context (context.id)}
+    {#each rows as context (context.id)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="context-row"
@@ -282,6 +284,14 @@
   <div class="week-total">
     <span>Selected week</span><strong>{duration(app.totals({ kind: 'week' }).weekMs)}</strong>
   </div>
+  <button
+    class="nav-row settings-link"
+    class:active={app.page.kind === 'settings'}
+    aria-label="App settings"
+    aria-current={app.page.kind === 'settings' ? 'page' : undefined}
+    onclick={() => app.navigate({ kind: 'settings' })}
+    ><Icon name="settings" /> <span>Settings</span></button
+  >
   <!-- The WAI-ARIA window splitter is a focusable separator. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
@@ -441,6 +451,10 @@
     font-size: 30px;
     font-weight: 400;
     letter-spacing: -1px;
+  }
+  .settings-link {
+    margin-top: var(--space-4);
+    margin-bottom: 0;
   }
   .resize-handle {
     position: absolute;

@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod data_files;
+
 use kagami_core::{Change, Error, Query, Receipt, Store, Workspace};
 use std::{
     sync::{Arc, Mutex},
@@ -74,6 +76,7 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let identity = &app.config().identifier;
             let directory = app.path().local_data_dir()?.join(identity);
@@ -81,6 +84,9 @@ fn main() {
             std::fs::create_dir_all(&database_dir)?;
             let store = Store::open(database_dir.join("kagami.sqlite3"))?;
             app.manage(Arc::new(Mutex::new(store)) as Database);
+            app.manage(Arc::new(data_files::DataFiles::new(
+                directory.join("recovery"),
+            )));
             // Build at runtime so WebView2's profile never shares the database path
             // or writes next to the executable in Program Files.
             let window = tauri::WebviewWindowBuilder::new(
@@ -166,7 +172,15 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![read_workspace, apply_change])
+        .invoke_handler(tauri::generate_handler![
+            read_workspace,
+            apply_change,
+            data_files::export_data,
+            data_files::choose_import,
+            data_files::cancel_import,
+            data_files::apply_import,
+            data_files::has_recovery_files,
+        ])
         .run(context)
         .expect("Could not start Kagami");
 }

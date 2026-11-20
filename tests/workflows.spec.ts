@@ -343,3 +343,80 @@ test('tree drops persist both hierarchy and sibling placement', async ({ page })
     (await snapshot(page)).contexts.find((x: { name: string }) => x.name === 'C'),
   ).toMatchObject({ parentId: null, position: 2 });
 });
+
+test('moving a context to a branch with a same-named sibling reports the conflict', async ({
+  page,
+}) => {
+  const create = (name: string, parentId: string | null = null) =>
+    rpc(page, 'change', {
+      change: { type: 'create_context', name, parentId, color: '#7FBCF5' },
+    });
+  const japanese = (await create('Japanese')).id;
+  const english = (await create('English')).id;
+  const reading = (await create('Reading', japanese)).id;
+  await create('Reading', english);
+  await page.reload();
+
+  const source = page.locator('.context-row').filter({
+    has: page.getByTitle('Japanese / Reading', { exact: true }),
+  });
+  const target = page.locator('.context-row').filter({
+    has: page.getByRole('button', { name: 'English', exact: true }),
+  });
+  await source.dragTo(target);
+  const message = 'English already has a context named Reading.';
+  await expect(page.getByRole('alert')).toHaveText(message);
+
+  await source.getByRole('button', { name: 'Reading', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('complementary', { name: 'Context settings' });
+  const parent = settings.getByRole('combobox', { name: 'Parent context' });
+  await parent.selectOption(english);
+  await expect(settings.getByRole('alert')).toHaveText(message);
+  await expect(parent).toHaveValue(japanese);
+  expect(
+    (await snapshot(page)).contexts.find((context: { id: string }) => context.id === reading),
+  ).toMatchObject({ parentId: japanese });
+});
+
+test('import requires an explicit mode and makes a replaced workspace available for recovery', async ({
+  page,
+}) => {
+  await createContext(page, 'Current');
+  await page.getByRole('button', { name: 'App settings' }).click();
+  const importData = page.getByRole('button', { name: 'Import data', exact: true });
+  const file = {
+    name: 'new-workspace.json',
+    data: {
+      format: 'kagami-data',
+      version: 1,
+      recordings: [{ contextPath: ['Imported'], startedAt: 1000, endedAt: 2000 }],
+    },
+  };
+  const review = page.getByRole('dialog', { name: 'Import data' });
+  await rpc(page, 'next_import', file);
+  await importData.click();
+  await expect(review.getByText(file.name)).toBeVisible();
+  await expect(review.getByText('1 context · 1 recording')).toBeVisible();
+  await expect(review.getByRole('button', { name: 'Add data' })).toBeDisabled();
+  const add = review.getByRole('radio', { name: /Add to current workspace/ });
+  const replace = review.getByRole('radio', { name: /Replace workspace/ });
+  await add.check();
+  await expect(review.getByRole('button', { name: 'Add data' })).toBeEnabled();
+  await add.press('ArrowDown');
+  await expect(replace).toBeChecked();
+  await review.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('button', { name: 'Current', exact: true })).toBeVisible();
+
+  await rpc(page, 'next_import', file);
+  await importData.click();
+  await review.getByRole('radio', { name: /Replace workspace/ }).check();
+  await review.getByRole('button', { name: 'Replace workspace' }).click();
+  await expect(review).toHaveCount(0);
+  await expect(page.getByText('Workspace replaced. Recovery copy saved.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Current', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Choose recovery copy' }).click();
+  await review.getByRole('radio', { name: /Replace workspace/ }).check();
+  await review.getByRole('button', { name: 'Replace workspace' }).click();
+  await expect(page.getByRole('button', { name: 'Current', exact: true })).toBeVisible();
+});

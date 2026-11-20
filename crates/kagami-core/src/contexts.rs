@@ -1,5 +1,5 @@
 use crate::{Context, Error, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 pub(crate) fn all(db: &Connection) -> Result<Vec<Context>> {
@@ -24,7 +24,7 @@ pub(crate) fn check_target(db: &Connection, id: Option<&str>, trackable: bool) -
     }
     Ok(())
 }
-fn name(db: &Connection, value: &str, except: Option<&str>) -> Result<(String, String)> {
+pub(crate) fn name_parts(value: &str) -> Result<(String, String)> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.chars().count() > 120 || trimmed.chars().any(char::is_control)
     {
@@ -36,17 +36,29 @@ fn name(db: &Connection, value: &str, except: Option<&str>) -> Result<(String, S
     if key == "unassigned" {
         return Err(Error::invalid("Unassigned is a reserved name."));
     }
-    let duplicate: Option<String> = db
-        .query_row("SELECT id FROM contexts WHERE name_key=?1", [&key], |r| {
-            r.get(0)
-        })
-        .optional()?;
-    if duplicate.as_deref().is_some_and(|id| Some(id) != except) {
-        return Err(Error::invalid("A context with this name already exists."));
-    }
     Ok((trimmed.into(), key))
 }
-fn color(value: &str) -> Result<String> {
+fn check_name(
+    db: &Connection,
+    name: &str,
+    key: &str,
+    parent: Option<&str>,
+    except: Option<&str>,
+) -> Result<()> {
+    let taken = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM contexts WHERE parent_id IS ?1 AND name_key=?2 AND id IS NOT ?3)",
+        params![parent, key, except],
+        |r| r.get::<_, bool>(0),
+    )?;
+    if taken {
+        return Err(Error::invalid(match parent {
+            Some(id) => format!("{} already has a context named {name}.", get(db, id)?.name),
+            None => format!("A context named {name} already exists at the top level."),
+        }));
+    }
+    Ok(())
+}
+pub(crate) fn color(value: &str) -> Result<String> {
     let value = value.trim();
     let value = value.strip_prefix('#').unwrap_or(value);
     if ![3, 6].contains(&value.len()) || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -82,7 +94,8 @@ pub(crate) fn create(
     hex: &str,
 ) -> Result<String> {
     check_target(db, parent, false)?;
-    let (name, key) = name(db, value, None)?;
+    let (name, key) = name_parts(value)?;
+    check_name(db, &name, &key, parent, None)?;
     let color = color(hex)?;
     let id = Uuid::new_v4().to_string();
     db.execute(
@@ -95,8 +108,9 @@ pub(crate) fn create(
     Ok(id)
 }
 pub(crate) fn rename(db: &Connection, id: &str, value: &str) -> Result<()> {
-    get(db, id)?;
-    let (name, key) = name(db, value, Some(id))?;
+    let context = get(db, id)?;
+    let (name, key) = name_parts(value)?;
+    check_name(db, &name, &key, context.parent_id.as_deref(), Some(id))?;
     db.execute(
         "UPDATE contexts SET name=?1,name_key=?2 WHERE id=?3",
         params![name, key, id],
@@ -132,6 +146,7 @@ pub(crate) fn move_context(
             .find(|c| c.id == current)
             .and_then(|c| c.parent_id.as_deref());
     }
+    check_name(db, &old.name, &old.name.to_lowercase(), parent, Some(id))?;
     let mut ids = siblings(db, parent, id)?;
     if position > ids.len() {
         return Err(Error::invalid(
@@ -170,12 +185,31 @@ pub(crate) fn set_locked(db: &Connection, id: &str, locked: bool) -> Result<()> 
 }
 pub(crate) fn delete(db: &Connection, id: &str) -> Result<()> {
     let old = get(db, id)?;
-    // SQLite's cascades remove descendants and their recordings in this transaction.
-    db.execute("DELETE FROM contexts WHERE id=?1", [id])?;
+    delete_tree(db, Some(id))?;
     reorder(
         db,
         old.parent_id.as_deref(),
         &siblings(db, old.parent_id.as_deref(), id)?,
     )?;
+    Ok(())
+}
+
+pub(crate) fn delete_tree(db: &Connection, root: Option<&str>) -> Result<()> {
+    // Only recording cascades are needed when each context is deleted after its children.
+    let mut tree = db.prepare(
+        "WITH RECURSIVE tree(id, depth) AS (
+            SELECT id, 0 FROM contexts WHERE id = ?1 OR (?1 IS NULL AND parent_id IS NULL)
+            UNION ALL
+            SELECT contexts.id, tree.depth + 1 FROM contexts JOIN tree ON contexts.parent_id = tree.id
+         )
+         SELECT id FROM tree ORDER BY depth DESC",
+    )?;
+    let ids = tree
+        .query_map([root], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut delete = db.prepare("DELETE FROM contexts WHERE id=?1")?;
+    for id in ids {
+        delete.execute([id])?;
+    }
     Ok(())
 }

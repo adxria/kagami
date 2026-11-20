@@ -1,5 +1,5 @@
 import * as transport from '$transport';
-import type { Change, Page, Query, Totals, Workspace } from './types';
+import type { Change, ImportMode, Page, Query, Totals, Workspace } from './types';
 import { errorMessage } from './types';
 import { addDays, dayStart, weekStart } from './time';
 
@@ -86,11 +86,17 @@ export class Controller {
     }
     this.loading = false;
   }
-  async change(change: Change) {
+  change(change: Change) {
+    return this.save(() => transport.apply(change));
+  }
+  importData(token: string, mode: ImportMode) {
+    return this.save(() => transport.applyImport(token, mode));
+  }
+  private async save<T>(apply: () => Promise<T>) {
     if (this.disabled) throw new Error('Refresh the workspace before making another change.');
     this.busy = true;
     try {
-      const receipt = await transport.apply(change);
+      const receipt = await apply();
       // Commit succeeded. A refresh failure must never reopen a creation draft or
       // imply the write failed. Disable further writes until the snapshot recovers.
       this.stale = true;
@@ -102,7 +108,7 @@ export class Controller {
   }
   navigate(page: Page) {
     this.page = page;
-    if (!this.running && page.kind !== 'week')
+    if (!this.running && (page.kind === 'context' || page.kind === 'unassigned'))
       this.selectedContext = page.kind === 'context' ? page.id : null;
   }
   navigateWeek(delta: number) {
@@ -130,7 +136,7 @@ export class Controller {
       this.selectedContext = contextId;
     } else await this.change({ type: 'start_timer', contextId: this.selectedContext });
   }
-  totals(target: Page): Totals {
+  totals(target: Exclude<Page, { kind: 'settings' }>): Totals {
     const snapshot = this.snapshot;
     const base =
       target.kind === 'week'

@@ -15,7 +15,7 @@ impl Store {
     fn initialize(mut connection: Connection) -> Result<Self> {
         // Inspect first. Never change journal settings or schema on a newer database.
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version != 0 && version != 1 {
+        if !(0..=2).contains(&version) {
             return Err(Error {
                 code: "version",
                 message: format!(
@@ -24,12 +24,26 @@ impl Store {
             });
         }
         connection.busy_timeout(Duration::from_secs(5))?;
-        connection.pragma_update(None, "foreign_keys", true)?;
-        if version == 0 {
-            let tx = connection.transaction()?;
-            tx.execute_batch(include_str!("schema.sql"))?;
+        if version < 2 {
+            // Rebuild contexts without cascading through recordings that reference it.
+            connection.pragma_update(None, "foreign_keys", false)?;
+            let tx =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            if version == 0 {
+                tx.execute_batch(include_str!("schema.sql"))?;
+            }
+            if version < 2 {
+                tx.execute_batch(include_str!("context-names-v2.sql"))?;
+                if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
+                    return Err(Error::invalid(
+                        "The database has invalid context references.",
+                    ));
+                }
+            }
             tx.commit()?;
         }
+        connection.pragma_update(None, "foreign_keys", true)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
         Ok(Self { connection })
