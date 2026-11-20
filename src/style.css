@@ -166,6 +166,10 @@ small,
   height: 100%;
   min-width: 960px;
 }
+.app-shell.focus-shell {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
 main {
   display: flex;
   flex-direction: column;
@@ -207,11 +211,21 @@ main {
   border-radius: var(--radius-large);
   padding: 8px 12px;
 }
+.timer-launch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
 .timer-readout {
   font-size: 24px;
   letter-spacing: -0.6px;
   font-variant-numeric: tabular-nums;
-  min-width: 106px;
+}
+.focus-launcher {
+  color: var(--text-secondary);
+}
+.focus-launcher:hover {
+  color: var(--accent);
 }
 .timer-button {
   width: 42px;

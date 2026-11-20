@@ -18,7 +18,7 @@ async function rpc(page: Page, method: string, extra: Record<string, unknown> = 
   );
 }
 async function snapshot(page: Page) {
-  const now = Date.now();
+  const now = await page.evaluate(() => Date.now());
   const start = now - 7 * 86400_000;
   return rpc(page, 'read', {
     query: {
@@ -39,6 +39,130 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled();
 });
+test('entering break setup saves the running timer before the countdown starts', async ({
+  page,
+}) => {
+  const start = Date.UTC(2026, 10, 18, 12);
+  await page.clock.install({ time: start - 60_000 });
+  await page.clock.pauseAt(start);
+  await page.reload();
+  await createContext(page, 'Reading');
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  const original = (await snapshot(page)).running;
+  await page.clock.fastForward(100 * 60_000);
+  const headerFocus = page.locator('header').getByRole('button', { name: 'Focus Mode' });
+  await headerFocus.click();
+  await expect(page.getByRole('timer', { name: 'Elapsed focus time' })).toHaveText('01:40:00');
+  await expect(page.getByText('Reading', { exact: true })).toBeVisible();
+
+  const takeBreak = page.getByRole('button', { name: 'Take a break' });
+  await rpc(page, 'fail_change');
+  await takeBreak.click();
+  await expect(page.getByRole('alert')).toContainText('Injected write failure');
+  expect((await snapshot(page)).running).toEqual(original);
+
+  await takeBreak.click();
+  await expect(page.getByRole('heading', { name: 'Break ready' })).toBeVisible();
+  const prepared = await snapshot(page);
+  expect(prepared.running).toBeNull();
+  expect(prepared.activeBreak.endsAt).toBeNull();
+  expect(prepared.recordings[0]).toMatchObject({ id: original.id, endedAt: start + 100 * 60_000 });
+
+  const editClock = page.getByRole('button', { name: /^Edit break duration/ });
+  const input = page.getByRole('textbox', { name: 'Break duration' });
+  await expect(editClock).toContainText('00:20:00');
+  await editClock.press('Enter');
+  await expect(input).toBeFocused();
+  await input.fill('00:00:00');
+  await input.press('Enter');
+  await expect(page.getByRole('alert')).toContainText('Enter a positive duration');
+  await input.press('Escape');
+  await expect(editClock).toBeFocused();
+  await expect(editClock).toContainText('00:20:00');
+
+  await editClock.click();
+  await input.fill('00:00:12');
+  await page.getByRole('button', { name: 'Back to workspace' }).click();
+  await expect(headerFocus).toBeFocused();
+  await page.clock.fastForward(30_000);
+  await page.getByRole('complementary').getByRole('button', { name: 'Focus Mode' }).click();
+  await expect(input).toHaveValue('00:00:12');
+  await input.press('Enter');
+  await expect(editClock).toContainText('00:00:12');
+  const startBreak = page.getByRole('button', { name: 'Start break' });
+  await rpc(page, 'fail_change');
+  await startBreak.click();
+  await expect(page.getByRole('alert')).toContainText('Injected write failure');
+  expect((await snapshot(page)).activeBreak).toEqual(prepared.activeBreak);
+  await startBreak.click();
+  await expect(page.getByRole('heading', { name: 'On break' })).toBeVisible();
+  await expect(page.getByRole('timer', { name: 'Time remaining' })).toHaveText('00:00:12');
+
+  await page.clock.fastForward(16_000);
+  await expect(page.getByRole('heading', { name: 'Break finished' })).toBeVisible();
+  await expect(page.getByRole('timer', { name: 'Time since break ended' })).toHaveText('00:00:04');
+  await page.getByRole('button', { name: 'Done' }).click();
+  const startFocus = page.getByRole('button', { name: 'Start focus' });
+  await expect(startFocus).toBeEnabled();
+  const idle = await snapshot(page);
+  expect(idle.running).toBeNull();
+  expect(idle.totals.lifetimeMs).toBe(100 * 60_000);
+  await startFocus.click();
+  await expect(takeBreak).toBeEnabled();
+  const next = (await snapshot(page)).running;
+  expect(next.startedAt - prepared.recordings[0].endedAt).toBe(46_000);
+  expect(next.contextId).toBe(original.contextId);
+  await page.getByRole('button', { name: 'Discard recording' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(startFocus).toBeEnabled();
+  expect((await snapshot(page)).recordings).toEqual(prepared.recordings);
+});
+test('the break ratio persists and dismissing or ending a break leaves the timer idle', async ({
+  page,
+}) => {
+  const settings = page.getByRole('button', { name: 'App settings' });
+  await settings.click();
+  const percentage = page.getByRole('spinbutton', { name: 'Break percentage' });
+  await expect(page.getByText('1 hour of focus earns 12 minutes of break.')).toBeVisible();
+  await percentage.fill('13');
+  await expect(
+    page.getByText('1 hour of focus earns 7 minutes 48 seconds of break.'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Save break percentage' }).click();
+  await expect(page.getByText('Break percentage saved.')).toBeVisible();
+  await page.reload();
+  await settings.click();
+  await expect(percentage).toHaveValue('13');
+
+  await page.locator('header').getByRole('button', { name: 'Focus Mode' }).click();
+  const startFocus = page.getByRole('button', { name: 'Start focus' });
+  const takeBreak = page.getByRole('button', { name: 'Take a break' });
+  await startFocus.click();
+  await takeBreak.click();
+  await page.getByRole('button', { name: 'Dismiss break' }).click();
+  await expect(startFocus).toBeEnabled();
+  const dismissed = await snapshot(page);
+  expect(dismissed.activeBreak).toBeNull();
+  expect(dismissed.running).toBeNull();
+  expect(dismissed.recordings).toHaveLength(1);
+
+  await startFocus.click();
+  await takeBreak.click();
+  await page.getByRole('button', { name: /^Edit break duration/ }).click();
+  await page.getByRole('textbox', { name: 'Break duration' }).fill('00:05:00');
+  await page.getByRole('button', { name: 'Start break' }).click();
+  await page.getByRole('button', { name: 'End break' }).click();
+  await expect(startFocus).toBeEnabled();
+  const ended = await snapshot(page);
+  expect(ended.activeBreak).toBeNull();
+  expect(ended.running).toBeNull();
+  await startFocus.click();
+  await page.getByRole('button', { name: 'Save and stop' }).click();
+  await expect(startFocus).toBeEnabled();
+  const finished = await snapshot(page);
+  expect(finished.running).toBeNull();
+  expect(finished.recordings).toHaveLength(3);
+});
 test('search cycling, cancellation and assignment failures preserve the running recording', async ({
   page,
 }) => {
@@ -55,6 +179,9 @@ test('search cycling, cancellation and assignment failures preserve the running 
   await picker.press('Escape');
   await expect(picker).toHaveValue('Work');
   await picker.press('Tab');
+  const focusMode = page.locator('header').getByRole('button', { name: 'Focus Mode' });
+  await expect(focusMode).toBeFocused();
+  await focusMode.press('Tab');
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeFocused();
   await picker.click();
   const work = page.getByRole('option', { name: 'Work', exact: true });
@@ -115,6 +242,9 @@ test('locked choices require an exact search and remain available for completed 
   await picker.press('Enter');
   await expect(picker).toHaveAttribute('aria-expanded', 'true');
   await picker.press('Tab');
+  const focusMode = page.locator('header').getByRole('button', { name: 'Focus Mode' });
+  await expect(focusMode).toBeFocused();
+  await focusMode.press('Tab');
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeFocused();
   await picker.click();
   await picker.fill(' PROJECT / ARCHIVE ');

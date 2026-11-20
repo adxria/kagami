@@ -1,5 +1,6 @@
 use crate::{
-    contexts, recordings, ContextTotals, Error, Query, Recording, Result, Totals, Workspace,
+    contexts, recordings, ActiveBreak, ContextTotals, Error, Query, Recording, Result, Totals,
+    Workspace,
 };
 use rusqlite::{params, Connection};
 use std::collections::{HashMap, HashSet};
@@ -15,7 +16,12 @@ fn totals(recording: &Recording, q: Query, now: i64) -> Totals {
         lifetime_ms: (end - recording.started_at).max(0),
     }
 }
-pub(crate) fn read(db: &Connection, q: Query, now: i64) -> Result<Workspace> {
+pub(crate) fn read(
+    db: &Connection,
+    q: Query,
+    now: i64,
+    active_break: Option<ActiveBreak>,
+) -> Result<Workspace> {
     for (start, end) in [(q.week_start, q.week_end), (q.today_start, q.today_end)] {
         if start < 0 || end <= start || end > 253_402_300_799_999 {
             return Err(Error::invalid("Invalid calendar boundaries."));
@@ -85,6 +91,7 @@ pub(crate) fn read(db: &Connection, q: Query, now: i64) -> Result<Workspace> {
         contexts,
         recordings,
         running,
+        active_break,
         overlap_ids,
         totals: total,
         unassigned: direct.get(&None).copied().unwrap_or_default(),

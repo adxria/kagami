@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { Controller } from './lib/controller.svelte';
-  import { errorMessage, type Entry, type EntryDraft } from './lib/types';
+  import { errorMessage, type Entry, type EntryDraft, type WorkspacePage } from './lib/types';
   import { addDays, duration } from './lib/time';
   import { colorStyle, contextColor, contextPath, subtreeIds } from './lib/contexts';
   import Sidebar from './components/Sidebar.svelte';
@@ -12,7 +12,11 @@
   import EntryEditor from './components/EntryEditor.svelte';
   import Confirm from './components/Confirm.svelte';
   import Timeline from './components/Timeline.svelte';
+  import FocusMode from './components/FocusMode.svelte';
+  import Icon from './components/Icon.svelte';
   const app = new Controller();
+  let previousPage: WorkspacePage = { kind: 'week' };
+  let focusLauncher = '';
   let contextDraft = $state<{ parentId: string | null } | null>(null),
     editor = $state<{ entry: Entry | null; initial: EntryDraft } | null>(null),
     preview = $state<EntryDraft | null>(null);
@@ -40,6 +44,7 @@
   );
   const canCreate = $derived(
     app.page.kind !== 'settings' &&
+      app.page.kind !== 'focus' &&
       !app.disabled &&
       app.week < app.now &&
       !pageContext?.trackingLocked &&
@@ -51,6 +56,22 @@
     `${new Date(app.week).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${new Date(addDays(app.week, 6)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`,
   );
   onMount(() => app.mount());
+  function openFocus(launcher: string) {
+    if (app.page.kind === 'focus') return;
+    previousPage = app.page;
+    focusLauncher = launcher;
+    app.navigate({ kind: 'focus' });
+  }
+  async function closeFocus() {
+    const destination = previousPage;
+    app.navigate(
+      destination.kind === 'context' && !app.contexts.some((c) => c.id === destination.id)
+        ? { kind: 'week' }
+        : destination,
+    );
+    await tick();
+    document.getElementById(focusLauncher)?.focus();
+  }
   async function timer() {
     timerError = '';
     try {
@@ -107,69 +128,87 @@
   }
 </script>
 
-<div class="app-shell">
-  <Sidebar {app} oncreate={(parentId) => (contextDraft = { parentId })} />
+<div class="app-shell" class:focus-shell={app.page.kind === 'focus'}>
+  {#if app.page.kind !== 'focus'}
+    <Sidebar
+      {app}
+      oncreate={(parentId) => (contextDraft = { parentId })}
+      onfocusmode={() => openFocus('sidebar-focus-mode')}
+    />
+  {/if}
   <main>
-    <header class="main-header">
-      {#if app.page.kind === 'settings'}
-        <h1>Settings</h1>
-      {:else}
-        <div class="week-navigation">
-          <div>
-            <span class="field-note">{app.page.kind === 'week' ? 'Week' : 'Selected week'}</span>
-            <h1>{weekLabel}</h1>
+    {#if app.page.kind !== 'focus'}
+      <header class="main-header">
+        {#if app.page.kind === 'settings'}
+          <h1>Settings</h1>
+        {:else}
+          <div class="week-navigation">
+            <div>
+              <span class="field-note">{app.page.kind === 'week' ? 'Week' : 'Selected week'}</span>
+              <h1>{weekLabel}</h1>
+            </div>
+            <div class="week-arrows">
+              <button
+                class="icon-button"
+                aria-label="Previous week"
+                onclick={() => app.navigateWeek(-1)}>‹</button
+              ><button class="quiet" onclick={() => app.today()}>Today</button><button
+                class="icon-button"
+                aria-label="Next week"
+                onclick={() => app.navigateWeek(1)}>›</button
+              >
+            </div>
           </div>
-          <div class="week-arrows">
+        {/if}
+        <div class="tracker-group">
+          <div
+            class="timer-controls"
+            style={colorStyle(contextColor(app.trackingId, app.contexts))}
+          >
+            <ContextPicker
+              contexts={app.contexts}
+              value={app.trackingId}
+              disabled={app.disabled}
+              onselect={(id) => app.assign(id)}
+            />
+            <div class="timer-launch">
+              <span class="timer-readout" aria-label="Elapsed time"
+                >{app.running ? duration(app.now - app.running.startedAt, true) : '00:00:00'}</span
+              >
+              <button
+                id="header-focus-mode"
+                class="icon-button focus-launcher"
+                aria-label="Focus Mode"
+                title="Focus Mode"
+                onclick={() => openFocus('header-focus-mode')}><Icon name="focus" /></button
+              >
+            </div>
             <button
-              class="icon-button"
-              aria-label="Previous week"
-              onclick={() => app.navigateWeek(-1)}>‹</button
-            ><button class="quiet" onclick={() => app.today()}>Today</button><button
-              class="icon-button"
-              aria-label="Next week"
-              onclick={() => app.navigateWeek(1)}>›</button
+              class="primary timer-button"
+              class:stop={!!app.running}
+              disabled={app.timerDisabled}
+              aria-label={app.running ? 'Stop' : 'Start'}
+              onclick={timer}
+              ><svg viewBox="0 0 24 24" aria-hidden="true"
+                >{#if app.running}<rect x="7" y="7" width="10" height="10" rx="1" />{:else}<path
+                    d="M9 5.5 19 12 9 18.5Z"
+                  />{/if}</svg
+              ></button
             >
+            <div class="discard-slot">
+              {#if app.running}<button
+                  class="icon-button danger-text"
+                  aria-label="Discard"
+                  title="Discard current entry"
+                  disabled={app.disabled}
+                  onclick={() => app.running && deleteEntry(app.running)}>×</button
+                >{/if}
+            </div>
           </div>
+          {#if timerError}<p class="error timer-error" role="alert">{timerError}</p>{/if}
         </div>
-      {/if}
-      <div class="tracker-group">
-        <div class="timer-controls" style={colorStyle(contextColor(app.trackingId, app.contexts))}>
-          <ContextPicker
-            contexts={app.contexts}
-            value={app.trackingId}
-            disabled={app.disabled}
-            onselect={(id) => app.assign(id)}
-          />
-          <span class="timer-readout" aria-label="Elapsed time"
-            >{app.running ? duration(app.now - app.running.startedAt, true) : '00:00:00'}</span
-          >
-          <button
-            class="primary timer-button"
-            class:stop={!!app.running}
-            disabled={app.disabled ||
-              (!app.running &&
-                !!app.contexts.find((c) => c.id === app.selectedContext)?.trackingLocked)}
-            aria-label={app.running ? 'Stop' : 'Start'}
-            onclick={timer}
-            ><svg viewBox="0 0 24 24" aria-hidden="true"
-              >{#if app.running}<rect x="7" y="7" width="10" height="10" rx="1" />{:else}<path
-                  d="M9 5.5 19 12 9 18.5Z"
-                />{/if}</svg
-            ></button
-          >
-          <div class="discard-slot">
-            {#if app.running}<button
-                class="icon-button danger-text"
-                aria-label="Discard"
-                title="Discard current entry"
-                disabled={app.disabled}
-                onclick={() => app.running && deleteEntry(app.running)}>×</button
-              >{/if}
-          </div>
-        </div>
-        {#if timerError}<p class="error timer-error" role="alert">{timerError}</p>{/if}
-      </div>
-    </header>
+      </header>
+    {/if}
     {#if !app.available}<div class="notice">
         Open Kagami as a desktop app to track and save time.
       </div>{/if}
@@ -185,7 +224,9 @@
           >Dismiss</button
         >
       </div>{/if}
-    {#if app.page.kind === 'settings'}
+    {#if app.page.kind === 'focus'}
+      <FocusMode {app} onback={closeFocus} ondiscard={deleteEntry} />
+    {:else if app.page.kind === 'settings'}
       <Settings {app} />
     {:else}
       {#if app.snapshot?.overlapIds.some((id) => entries.some((e) => e.id === id))}<div

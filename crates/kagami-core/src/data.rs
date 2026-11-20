@@ -262,6 +262,9 @@ impl Store {
         }
         insert_data(&tx, data)?;
         tx.commit()?;
+        if matches!(mode, ImportMode::Replace) {
+            self.clear_break();
+        }
         Ok(recovery_saved)
     }
 }

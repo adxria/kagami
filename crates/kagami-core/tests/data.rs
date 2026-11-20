@@ -276,6 +276,53 @@ fn replacing_and_deleting_a_deep_context_tree_succeeds() {
 }
 
 #[test]
+fn only_successful_workspace_replacement_clears_the_break() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = Store::memory().unwrap();
+    let id = store
+        .apply_change(Change::StartTimer { context_id: None }, NOW - 1_000)
+        .unwrap()
+        .id;
+    store
+        .apply_change(Change::PrepareBreak { id: id.clone() }, NOW)
+        .unwrap();
+    store
+        .apply_change(
+            Change::StartBreak {
+                id: id.clone(),
+                duration_ms: 2_000,
+            },
+            NOW,
+        )
+        .unwrap();
+    let data = load(json!({
+        "format": "kagami-data", "version": 1,
+        "recordings": [{"contextPath": null, "startedAt": 1000, "endedAt": 3000}]
+    }));
+    let recovery = directory.path().join("recovery");
+    fs::write(&recovery, "").unwrap();
+    assert!(store
+        .import_data(&data, ImportMode::Replace, &recovery, NOW)
+        .is_err());
+    assert_eq!(read(&mut store).active_break.unwrap().id, id);
+
+    store
+        .import_data(&data, ImportMode::Add, &recovery, NOW)
+        .unwrap();
+    assert_eq!(read(&mut store).active_break.unwrap().id, id);
+
+    store
+        .import_data(
+            &data,
+            ImportMode::Replace,
+            &directory.path().join("backup"),
+            NOW,
+        )
+        .unwrap();
+    assert!(read(&mut store).active_break.is_none());
+}
+
+#[test]
 fn invalid_data_and_failed_replacement_leave_the_current_workspace_intact() {
     let invalid = br#"{"format":"kagami-data","version":1,"recordings":[{"contextPath":null,"startedAt":20,"endedAt":10}]}"#;
     assert!(ImportData::read(invalid.as_slice()).is_err());

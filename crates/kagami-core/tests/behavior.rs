@@ -88,6 +88,149 @@ fn timer_is_exclusive_persistent_and_stale_actions_cannot_resurrect_it() {
         .is_err());
 }
 #[test]
+fn break_setup_saves_work_and_only_the_prepared_break_can_start() {
+    let mut store = Store::memory().unwrap();
+    let work = context(&mut store, "Work", None);
+    let first = apply(
+        &mut store,
+        Change::StartTimer {
+            context_id: Some(work.clone()),
+        },
+    );
+    let start_break = |id: &str, duration_ms| Change::StartBreak {
+        id: id.into(),
+        duration_ms,
+    };
+    assert!(store
+        .apply_change(start_break(&first, 1_000), NOW + 100)
+        .is_err());
+    assert_eq!(store.running().unwrap().unwrap().id, first);
+    assert!(store.active_break().is_none());
+
+    store
+        .apply_change(Change::PrepareBreak { id: first.clone() }, NOW + 100)
+        .unwrap();
+    assert!(store.running().unwrap().is_none());
+    let prepared = store.active_break().unwrap();
+    assert_eq!(prepared.ends_at, None);
+    assert_eq!(prepared.focused_ms, 100);
+    assert_eq!(prepared.context_id.as_ref(), Some(&work));
+    assert!(store
+        .apply_change(start_break(&first, 0), NOW + 200)
+        .is_err());
+    assert_eq!(store.active_break().unwrap().ends_at, None);
+
+    store
+        .apply_change(start_break(&first, 1_000), NOW + 300)
+        .unwrap();
+    assert!(store
+        .apply_change(start_break(&first, 2_000), NOW + 400)
+        .is_err());
+    assert_eq!(store.active_break().unwrap().ends_at, Some(NOW + 1_300));
+
+    store
+        .apply_change(
+            Change::LockContext {
+                id: work.clone(),
+                locked: true,
+            },
+            NOW + 410,
+        )
+        .unwrap();
+    assert!(store
+        .apply_change(
+            Change::StartTimer {
+                context_id: Some(work),
+            },
+            NOW + 420,
+        )
+        .is_err());
+    assert_eq!(store.active_break().unwrap().id, first);
+    let next = store
+        .apply_change(Change::StartTimer { context_id: None }, NOW + 2_000)
+        .unwrap()
+        .id;
+    assert!(store.active_break().is_none());
+    store
+        .apply_change(Change::PrepareBreak { id: next.clone() }, NOW + 2_100)
+        .unwrap();
+    assert!(store
+        .apply_change(start_break(&first, 1_000), NOW + 2_200)
+        .is_err());
+    assert!(store
+        .apply_change(Change::EndBreak { id: first }, NOW + 2_200)
+        .is_err());
+    let snapshot = store.read_workspace(QUERY, NOW + 2_200).unwrap();
+    assert_eq!(snapshot.active_break.unwrap().id, next);
+    assert_eq!(snapshot.totals.lifetime_ms, 200);
+    store
+        .apply_change(Change::EndBreak { id: next }, NOW + 2_200)
+        .unwrap();
+    assert!(store.active_break().is_none());
+    assert!(store.running().unwrap().is_none());
+}
+
+#[test]
+fn finished_break_stays_finished_when_the_clock_moves_back() {
+    let mut store = Store::memory().unwrap();
+    let id = apply(&mut store, Change::StartTimer { context_id: None });
+    store
+        .apply_change(Change::PrepareBreak { id: id.clone() }, NOW + 100)
+        .unwrap();
+    store
+        .apply_change(
+            Change::StartBreak {
+                id,
+                duration_ms: 1_000,
+            },
+            NOW + 100,
+        )
+        .unwrap();
+    let finished = |store: &mut Store, now| {
+        store
+            .read_workspace(QUERY, now)
+            .unwrap()
+            .active_break
+            .unwrap()
+            .finished
+    };
+
+    assert!(!finished(&mut store, NOW + 500));
+    assert!(finished(&mut store, NOW + 1_100));
+    assert!(finished(&mut store, NOW + 500));
+}
+
+#[test]
+fn reopening_keeps_work_saved_before_a_break_and_drops_the_countdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("break.db");
+    let mut store = Store::open(&path).unwrap();
+    let id = apply(&mut store, Change::StartTimer { context_id: None });
+    store
+        .apply_change(Change::PrepareBreak { id: id.clone() }, NOW + 1_000)
+        .unwrap();
+    store
+        .apply_change(
+            Change::StartBreak {
+                id: id.clone(),
+                duration_ms: 2_000,
+            },
+            NOW + 1_000,
+        )
+        .unwrap();
+    assert_eq!(store.active_break().unwrap().ends_at, Some(NOW + 3_000));
+    drop(store);
+
+    let mut store = Store::open(&path).unwrap();
+    let snapshot = store.read_workspace(QUERY, NOW + 4_000).unwrap();
+    assert!(snapshot.active_break.is_none());
+    assert!(snapshot.running.is_none());
+    assert_eq!(snapshot.recordings.len(), 1);
+    assert_eq!(snapshot.recordings[0].id, id);
+    assert_eq!(snapshot.totals.lifetime_ms, 1_000);
+}
+
+#[test]
 fn immediate_stop_is_retained_and_clock_reversal_requires_correction() {
     let mut store = Store::memory().unwrap();
     let id = apply(&mut store, Change::StartTimer { context_id: None });

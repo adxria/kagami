@@ -13,6 +13,13 @@ export interface Entry {
   startedAt: number;
   endedAt: number | null;
 }
+export interface ActiveBreak {
+  id: string;
+  contextId: string | null;
+  focusedMs: number;
+  endsAt: number | null;
+  finished: boolean;
+}
 export interface Query {
   weekStart: number;
   weekEnd: number;
@@ -28,6 +35,7 @@ export interface Workspace {
   contexts: Context[];
   recordings: Entry[];
   running: Entry | null;
+  activeBreak: ActiveBreak | null;
   overlapIds: string[];
   totals: Totals;
   unassigned: Totals;
@@ -44,6 +52,9 @@ export type Change =
   | { type: 'delete_context'; id: string }
   | { type: 'start_timer'; contextId: string | null }
   | { type: 'stop_timer'; id: string }
+  | { type: 'prepare_break'; id: string }
+  | { type: 'start_break'; id: string; durationMs: number }
+  | { type: 'end_break'; id: string }
   | { type: 'assign_timer'; id: string; contextId: string | null }
   | { type: 'create_recording'; contextId: string | null; startedAt: number; endedAt: number }
   | {
@@ -58,11 +69,12 @@ export type Change =
 export interface Receipt {
   id: string;
 }
-export type Page =
+export type WorkspacePage =
   | { kind: 'week' }
   | { kind: 'settings' }
   | { kind: 'unassigned' }
   | { kind: 'context'; id: string };
+export type Page = WorkspacePage | { kind: 'focus' };
 export type ImportMode = 'add' | 'replace';
 export interface DataPreview {
   token: string;

@@ -1,9 +1,12 @@
-use crate::{contexts, recordings, reporting, Change, Error, Query, Receipt, Result, Workspace};
+use crate::{
+    contexts, recordings, reporting, ActiveBreak, Change, Error, Query, Receipt, Result, Workspace,
+};
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
 pub struct Store {
     pub(crate) connection: Connection,
+    active_break: Option<ActiveBreak>,
 }
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -46,11 +49,16 @@ impl Store {
         connection.pragma_update(None, "foreign_keys", true)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            active_break: None,
+        })
     }
     pub fn apply_change(&mut self, change: Change, now: i64) -> Result<Receipt> {
         recordings::valid_now(now)?;
         let tx = self.connection.transaction()?;
+        // Apply any replacement or clear only after the recording transaction commits.
+        let mut break_update = None;
         let id = match change {
             Change::CreateContext {
                 name,
@@ -82,10 +90,48 @@ impl Store {
                 id
             }
             Change::StartTimer { context_id } => {
+                break_update = Some(None);
                 recordings::start(&tx, context_id.as_deref(), now)?
             }
             Change::StopTimer { id } => {
                 recordings::stop(&tx, &id, now)?;
+                id
+            }
+            Change::PrepareBreak { id } => {
+                let recording = recordings::stop(&tx, &id, now)?;
+                break_update = Some(Some(ActiveBreak {
+                    id: id.clone(),
+                    context_id: recording.context_id,
+                    focused_ms: now - recording.started_at,
+                    ends_at: None,
+                    finished: false,
+                }));
+                id
+            }
+            Change::StartBreak { id, duration_ms } => {
+                let mut active = self
+                    .active_break
+                    .as_ref()
+                    .filter(|active| active.id == id && active.ends_at.is_none())
+                    .cloned()
+                    .ok_or_else(Error::stale)?;
+                let ends_at = now
+                    .checked_add(duration_ms)
+                    .filter(|ends_at| *ends_at > now && *ends_at <= recordings::MAX_TIMESTAMP)
+                    .ok_or_else(|| Error::invalid("Enter a positive, valid break duration."))?;
+                active.ends_at = Some(ends_at);
+                break_update = Some(Some(active));
+                id
+            }
+            Change::EndBreak { id } => {
+                if self
+                    .active_break
+                    .as_ref()
+                    .is_none_or(|active| active.id != id)
+                {
+                    return Err(Error::stale());
+                }
+                break_update = Some(None);
                 id
             }
             Change::AssignTimer { id, context_id } => {
@@ -124,16 +170,31 @@ impl Store {
             }
         };
         tx.commit()?;
+        if let Some(next) = break_update {
+            self.active_break = next;
+        }
         Ok(Receipt { id })
     }
     pub fn read_workspace(&mut self, query: Query, now: i64) -> Result<Workspace> {
         recordings::valid_now(now)?;
+        self.finish_break_if_due(now);
         let tx = self.connection.transaction()?;
-        let workspace = reporting::read(&tx, query, now)?;
+        let workspace = reporting::read(&tx, query, now, self.active_break.clone())?;
         tx.commit()?;
         Ok(workspace)
     }
     pub fn running(&self) -> Result<Option<crate::Recording>> {
         recordings::running(&self.connection)
+    }
+    pub fn active_break(&self) -> Option<&ActiveBreak> {
+        self.active_break.as_ref()
+    }
+    pub fn finish_break_if_due(&mut self, now: i64) {
+        if let Some(active) = &mut self.active_break {
+            active.finished |= active.ends_at.is_some_and(|ends_at| now >= ends_at);
+        }
+    }
+    pub(crate) fn clear_break(&mut self) {
+        self.active_break = None;
     }
 }

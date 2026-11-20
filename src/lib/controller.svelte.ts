@@ -1,7 +1,8 @@
 import * as transport from '$transport';
-import type { Change, ImportMode, Page, Query, Totals, Workspace } from './types';
+import type { Change, ImportMode, Page, Query, Totals, Workspace, WorkspacePage } from './types';
 import { errorMessage } from './types';
 import { addDays, dayStart, weekStart } from './time';
+import { readBreakPercentage, writeBreakPercentage } from './focus';
 
 export class Controller {
   snapshot = $state<Workspace | null>(null);
@@ -14,6 +15,8 @@ export class Controller {
   readError = $state('');
   desktopError = $state('');
   selectedContext = $state<string | null>(null);
+  breakPercentage = $state(readBreakPercentage());
+  breakDurationEdit = $state<{ id: string; committed: string; input: string | null } | null>(null);
   readonly available = transport.available;
   private zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   private monday = this.weekParts();
@@ -28,8 +31,21 @@ export class Controller {
   get running() {
     return this.snapshot?.running ?? null;
   }
+  get activeBreak() {
+    return this.snapshot?.activeBreak ?? null;
+  }
   get trackingId() {
     return this.running ? this.running.contextId : this.selectedContext;
+  }
+  get timerDisabled() {
+    return (
+      this.disabled ||
+      (!this.running && !!this.contexts.find((c) => c.id === this.selectedContext)?.trackingLocked)
+    );
+  }
+  setBreakPercentage(value: number) {
+    writeBreakPercentage(value);
+    this.breakPercentage = value;
   }
   query(): Query {
     this.syncZone();
@@ -62,6 +78,13 @@ export class Controller {
         const snapshot = await transport.read(query);
         if (token === this.requested) {
           this.snapshot = snapshot;
+          if (
+            this.breakDurationEdit &&
+            (snapshot.activeBreak?.id !== this.breakDurationEdit.id ||
+              snapshot.activeBreak.endsAt !== null)
+          ) {
+            this.breakDurationEdit = null;
+          }
           this.now = transport.currentTime();
           this.stale = false;
           this.readError = '';
@@ -136,7 +159,20 @@ export class Controller {
       this.selectedContext = contextId;
     } else await this.change({ type: 'start_timer', contextId: this.selectedContext });
   }
-  totals(target: Exclude<Page, { kind: 'settings' }>): Totals {
+  async prepareBreak(id: string) {
+    const running = this.running;
+    await this.change({ type: 'prepare_break', id });
+    if (running?.id === id) this.selectedContext = running.contextId;
+  }
+  async endBreak(id: string) {
+    const activeBreak = this.activeBreak;
+    await this.change({ type: 'end_break', id });
+    if (activeBreak?.id === id) {
+      this.selectedContext =
+        this.contexts.find((c) => c.id === activeBreak.contextId && !c.trackingLocked)?.id ?? null;
+    }
+  }
+  totals(target: Exclude<WorkspacePage, { kind: 'settings' }>): Totals {
     const snapshot = this.snapshot;
     const base =
       target.kind === 'week'
@@ -204,8 +240,12 @@ export class Controller {
       const now = transport.currentTime();
       const resumed = now - lastTick > 5_000 || now < lastTick;
       lastTick = now;
-      if (resumed) void this.refresh();
-      if (this.running || Math.abs(now - this.now) >= 60_000) this.now = now;
+      const activeBreak = this.activeBreak;
+      const endsAt = activeBreak?.endsAt;
+      if (resumed || (activeBreak?.finished === false && endsAt != null && now >= endsAt)) {
+        void this.refresh();
+      }
+      if (this.running || endsAt != null || Math.abs(now - this.now) >= 60_000) this.now = now;
       const next = this.calendarSignature();
       if (signature !== next) {
         signature = next;

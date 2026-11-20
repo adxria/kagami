@@ -65,8 +65,8 @@ pub(crate) fn start(db: &Connection, context: Option<&str>, now: i64) -> Result<
     )?;
     Ok(id)
 }
-pub(crate) fn stop(db: &Connection, id: &str, now: i64) -> Result<()> {
-    let value = get(db, id, true)?;
+pub(crate) fn stop(db: &Connection, id: &str, now: i64) -> Result<Recording> {
+    let mut value = get(db, id, true)?;
     if now < value.started_at {
         return Err(Error::invalid(
             "The clock moved before the timer's Start. Correct Start before stopping.",
@@ -78,7 +78,8 @@ pub(crate) fn stop(db: &Connection, id: &str, now: i64) -> Result<()> {
         "UPDATE recordings SET ended_at=?1 WHERE id=?2",
         params![now, id],
     )?;
-    Ok(())
+    value.ended_at = Some(now);
+    Ok(value)
 }
 pub(crate) fn assign(db: &Connection, id: &str, context: Option<&str>) -> Result<()> {
     get(db, id, true)?;

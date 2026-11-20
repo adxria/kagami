@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod break_alert;
 mod data_files;
 
 use kagami_core::{Change, Error, Query, Receipt, Store, Workspace};
@@ -55,10 +57,23 @@ async fn apply_change(
     db: tauri::State<'_, Database>,
     change: Change,
 ) -> kagami_core::Result<Receipt> {
+    #[cfg(windows)]
+    let starting_break = matches!(&change, Change::StartBreak { .. });
     let receipt = database_call(db.inner().clone(), move |store| {
         store.apply_change(change, now())
     })
     .await?;
+    #[cfg(windows)]
+    if starting_break {
+        if let Err(error) =
+            break_alert::schedule(app.clone(), db.inner().clone(), receipt.id.clone())
+        {
+            let _ = app.emit(
+                "desktop-error",
+                adapter_error(format!("Could not schedule the break chime: {error}")),
+            );
+        }
+    }
     let _ = app.emit("workspace-changed", ());
     Ok(receipt)
 }

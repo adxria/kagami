@@ -5,7 +5,14 @@
   import type { Controller } from '../lib/controller.svelte';
   import { errorMessage, type Entry, type EntryDraft } from '../lib/types';
   import { contextRows } from '../lib/contexts';
-  import { duration, localCandidates, offsetLabel, resolveLocal } from '../lib/time';
+  import {
+    duration,
+    localCandidates,
+    MAX_TIMESTAMP,
+    offsetLabel,
+    parseDuration,
+    resolveLocal,
+  } from '../lib/time';
   import { entryTimeParts, partsInput, partsProblem, timeSegments } from '../lib/entry-time';
   import { currentTime } from '$transport';
   let {
@@ -41,10 +48,8 @@
     end = $derived(resolveLocal(endText, preferredEnd));
   const rows = $derived(contextRows(app.contexts).filter((row) => !!entry || !row.trackingLocked));
   function durationMs(value: string) {
-    if (!/^\d+:[0-5]\d:[0-5]\d$/.test(value)) return null;
-    const [h, m, s] = value.split(':').map(Number);
-    const ms = (h * 3600 + m * 60 + s) * 1000;
-    return Number.isSafeInteger(ms) && ms <= 253402300799999 - (start ?? 0) ? ms : null;
+    const ms = parseDuration(value);
+    return ms !== null && ms <= MAX_TIMESTAMP - (start ?? 0) ? ms : null;
   }
   function edited() {
     durationEdit = null;

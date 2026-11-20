@@ -5,8 +5,15 @@
   import Icon from './Icon.svelte';
   import { duration } from '../lib/time';
   import { errorMessage, type Context } from '../lib/types';
-  let { app, oncreate }: { app: Controller; oncreate: (parentId: string | null) => void } =
-    $props();
+  let {
+    app,
+    oncreate,
+    onfocusmode,
+  }: {
+    app: Controller;
+    oncreate: (parentId: string | null) => void;
+    onfocusmode: () => void;
+  } = $props();
   function savedWidth() {
     try {
       return Math.max(200, Math.min(400, Number(localStorage.getItem('kagami.sidebar')) || 244));
@@ -199,6 +206,9 @@
     class:active={app.page.kind === 'week'}
     onclick={() => app.navigate({ kind: 'week' })}
     ><Icon name="calendar" /> <span>Week</span></button
+  >
+  <button id="sidebar-focus-mode" class="nav-row" onclick={onfocusmode}
+    ><Icon name="focus" /> <span>Focus Mode</span></button
   >
   <div class="context-toolbar">
     <h2>Contexts</h2>

@@ -54,6 +54,15 @@ pub struct Recording {
     pub started_at: i64,
     pub ended_at: Option<i64>,
 }
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveBreak {
+    pub id: String,
+    pub context_id: Option<String>,
+    pub focused_ms: i64,
+    pub ends_at: Option<i64>,
+    pub finished: bool,
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Query {
@@ -99,6 +108,16 @@ pub enum Change {
         context_id: Option<String>,
     },
     StopTimer {
+        id: String,
+    },
+    PrepareBreak {
+        id: String,
+    },
+    StartBreak {
+        id: String,
+        duration_ms: i64,
+    },
+    EndBreak {
         id: String,
     },
     AssignTimer {
@@ -153,6 +172,7 @@ pub struct Workspace {
     pub contexts: Vec<Context>,
     pub recordings: Vec<Recording>,
     pub running: Option<Recording>,
+    pub active_break: Option<ActiveBreak>,
     pub overlap_ids: Vec<String>,
     pub totals: Totals,
     pub unassigned: Totals,

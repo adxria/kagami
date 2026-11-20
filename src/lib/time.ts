@@ -1,5 +1,6 @@
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
+export const MAX_TIMESTAMP = 253_402_300_799_999;
 
 export function dayStart(value: number | Date): number {
   const date = new Date(value);
@@ -28,6 +29,13 @@ export function duration(value: number, seconds = false): string {
   if (h) return `${h}h ${String(m).padStart(2, '0')}m`;
   if (m) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+export function parseDuration(value: string): number | null {
+  if (!/^\d+:[0-5]\d:[0-5]\d$/.test(value)) return null;
+  const [hours, minutes, seconds] = value.split(':').map(Number);
+  const ms = (hours * 3600 + minutes * 60 + seconds) * 1000;
+  return Number.isSafeInteger(ms) ? ms : null;
 }
 
 export function clock(value: number, seconds = false): string {

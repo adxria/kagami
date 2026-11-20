@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import * as transport from '$transport';
   import type { Controller } from '../lib/controller.svelte';
+  import { breakDuration, validBreakPercentage } from '../lib/focus';
+  import { HOUR, MINUTE } from '../lib/time';
   import { errorMessage, type DataPreview, type ImportMode } from '../lib/types';
   import Modal from './Modal.svelte';
 
@@ -13,8 +15,35 @@
   let status = $state('');
   let error = $state('');
   let importError = $state('');
+  let percentage = $state<number | undefined>(untrack(() => app.breakPercentage));
+  let preferenceStatus = $state('');
+  let preferenceError = $state('');
   let mounted = false;
   const disabled = $derived(app.disabled || operation !== null);
+  const hourlyBreak = $derived(
+    validBreakPercentage(percentage) ? describeDuration(breakDuration(HOUR, percentage)) : '',
+  );
+
+  function describeDuration(ms: number) {
+    const minutes = Math.floor(ms / MINUTE);
+    const seconds = (ms % MINUTE) / 1_000;
+    const parts = [];
+    if (minutes || !seconds) parts.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`);
+    if (seconds) parts.push(`${seconds} ${seconds === 1 ? 'second' : 'seconds'}`);
+    return parts.join(' ');
+  }
+
+  function saveBreakPercentage(event: SubmitEvent) {
+    event.preventDefault();
+    preferenceStatus = preferenceError = '';
+    if (!validBreakPercentage(percentage)) return;
+    try {
+      app.setBreakPercentage(percentage);
+      preferenceStatus = 'Break percentage saved.';
+    } catch (cause) {
+      preferenceError = `Could not save the break percentage. ${errorMessage(cause)}`;
+    }
+  }
 
   onMount(() => {
     mounted = true;
@@ -126,6 +155,34 @@
     {#if status}<p class="field-note" role="status">{status}</p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
   </section>
+  <section aria-labelledby="focus-settings-heading">
+    <h2 id="focus-settings-heading">Focus Mode</h2>
+    <form class="break-preference" onsubmit={saveBreakPercentage}>
+      <label>
+        Break percentage
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          required
+          bind:value={percentage}
+          aria-describedby="break-percentage-preview"
+          oninput={() => (preferenceStatus = preferenceError = '')}
+        />
+      </label>
+      <button type="submit" disabled={!hourlyBreak || percentage === app.breakPercentage}
+        >Save break percentage</button
+      >
+      <p class="field-note" id="break-percentage-preview">
+        {hourlyBreak
+          ? `1 hour of focus earns ${hourlyBreak} of break.`
+          : 'Enter a whole percentage from 0 to 100.'}
+      </p>
+    </form>
+    {#if preferenceStatus}<p class="field-note" role="status">{preferenceStatus}</p>{/if}
+    {#if preferenceError}<p class="error" role="alert">{preferenceError}</p>{/if}
+  </section>
 </div>
 
 {#if preview}
@@ -188,6 +245,25 @@
     display: grid;
     gap: var(--space-4);
     max-width: 40rem;
+  }
+  section + section {
+    margin-top: var(--space-8);
+  }
+  .break-preference {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-2) var(--space-3);
+  }
+  .break-preference label {
+    margin: 0;
+  }
+  .break-preference input {
+    width: 7rem;
+    min-height: 39px;
+  }
+  .break-preference p {
+    flex: 0 0 100%;
   }
   .data-actions {
     display: grid;
